@@ -1,20 +1,15 @@
 name: Python CI 2
 
 on:
-  # 每天北京时间9:10触发（UTC时间1:10）
   schedule:
     - cron: '10 1 * * *'
-
-  # 允许手动触发
   workflow_dispatch:
-
-  # 提交代码到 main 分支时触发
   push:
     branches:
       - main
 
 jobs:
-  # ========== 原有的签到任务 ==========
+  # 原有的签到任务
   signin-job:
     name: 69云签到
     runs-on: ubuntu-latest
@@ -25,33 +20,56 @@ jobs:
       PASS1: ${{ secrets.PASS1 }}
       USER2: ${{ secrets.USER2 }}
       PASS2: ${{ secrets.PASS2 }}
-      # 如果你有更多账号，继续加 USER3, PASS3 等
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.9'
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-
       - name: Run Python script
         run: python 69yun.py
 
-  # ========== 新增的保活任务 ==========
+  # 保活任务（不需要任何外部 Action）
   keepalive-job:
-    name: 保活任务 - 防止定时任务被禁用
+    name: 保活任务
     runs-on: ubuntu-latest
     permissions:
-      actions: write   # 必须！允许任务调用 GitHub API
+      actions: write
+      contents: write
     steps:
-      - name: 检查仓库代码
+      - name: Checkout
         uses: actions/checkout@v4
-
-      - name: 执行保活操作
-        uses: gautamkrishnar/keepalive-workflow@v2
+        with:
+          persist-credentials: true
+          
+      - name: 通过 API 触发工作流
+        run: |
+          curl -L \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/69yuncheckin.yaml/dispatches \
+            -d '{"ref":"main"}'
+          
+      - name: 空提交保活（每7天一次）
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # 检查上一次保活提交是否超过7天
+          if [ ! -f .last_keepalive ] || [ $(($(date +%s) - $(cat .last_keepalive))) -gt 604800 ]; then
+            git commit --allow-empty -m "chore: 保活提交 $(date '+%Y-%m-%d')"
+            git push
+            date +%s > .last_keepalive
+            git add .last_keepalive
+            git commit -m "chore: 更新保活记录"
+            git push
+            echo "已执行保活提交"
+          else
+            echo "距离上次保活未满7天，跳过提交"
+          fi
